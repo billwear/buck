@@ -7,6 +7,7 @@ An eclectic collection of command line tools for various and nefarious purposes.
 * edcal: edits the default calendar file
 * getwx: fetches the local weather from wttr.in.
 * gottados: fetches the active calendar entries tagged with "@gotta"
+* jrnl: edit today's journal file
 * jrnlseed: pre-seed today's journal file
 * wannados: fetched the active calendar entries tagged with "@wanna".
 
