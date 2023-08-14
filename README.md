@@ -1,7 +1,7 @@
 # BUCK - Bill's Unix Command Kit
 An eclectic collection of command line tools for various and nefarious purposes.
 
-## Personal planner tools (planner)
+## Personal planner tools (/planner)
 
 * abook: prints my address book in /etc
 * edcal: edits the default calendar file
