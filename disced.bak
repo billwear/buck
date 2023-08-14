@@ -1,0 +1,467 @@
+#!/bin/bash
+# disced -m markdown-filename.md -s -n -v <maas-version> -p <base-markdown-repo-path>
+# where
+#   -m = markdown-filename with extension
+## eliminate this; either pass the filename on command line or send it from stdin
+#   -s = use the last staged copy of the document, not the github master
+#   -n = don't publish to discourse (for working on unreleased doc)
+#   -v = MAAS version to publish (using tabs), e.g., 3.4 (default current)
+#   -p = base markdown repo path (defaults to ~/src/mod/maas-offline-docs)
+#   -d = skip editing portion of code (for updating discourse / html directly)
+#   -h = usage message
+#
+
+# presets
+rescue_staged=false   # true = use the last staged version, instead of master
+dont_publish=false    # true = skip publishing portion
+do_edit=true          # false = skip editing portion
+VERSION="3.3"         # maas version, used for finding doc repo
+BASE_PATH="/home/stormrider/src/maas-doc" # default base path
+BENCH="/tmp/bench"    # where the workbench is stored
+STAGE="/tmp/staging"  # where the new markdown document is staged
+GALLEY="4917"         # fixed topic for galley proof
+LOG="$STAGE/log/tab2html.log"  # where we log html conversion actions
+
+# markdown filename, must be passed as first replaceable parameter
+GIT_MD_BASENAME=$1
+
+while getopts m:sdv:p:nh flag; do
+    case "$flag" in
+	m) GIT_MD_BASENAME=$OPTARG ;;
+        s) rescue_staged=true ;;
+	d) do_edit=false ;;
+	v) VERSION=$OPTARG ;;
+	p) BASE_PATH=$OPTARG ;;
+	n) dont_publish=true ;;
+	h) echo "disced -m <markdown_filename> -sdn -v <version_number> -p <base_path>"
+	   echo "   -s = use last staged version of document"
+	   echo "   -d = don't edit the document"
+	   echo "   -n = don't publish the document"
+	   exit;;
+    esac
+done
+
+# compute absolute path to markdown file
+GIT_MD_ABSPATH="$BASE_PATH/$VERSION/src/$GIT_MD_BASENAME"
+
+# compute the repo root, so we can store production html, if we get that far
+GIT_MD_DIR="$(dirname "${GIT_MD_ABSPATH}")"
+GIT_REPO_ROOT="$GIT_MD_DIR/.."
+
+# if we're using the previously staged version, different absolute path
+if $rescue_staged ; then
+    echo "substituting previously staged file for git original"
+    GIT_MD_ABSPATH="$STAGE/$GIT_MD_BASENAME"
+fi
+
+# peel topic number out of basename
+NAME=$(echo "$GIT_MD_BASENAME" | cut -f 1 -d '.')
+TOPIC_NUMBER=$(echo "$NAME" | rev | cut -f 1 -d'-' | rev)
+
+# compute name of html file
+HTMLNAME=$(echo "$NAME" | rev | cut -f 2- -d'-' | rev)".html"
+
+# always convert "maas-documentation.html" to "maas-documentation-25.html"
+if [ $HTMLNAME == "maas-documentation.html" ]
+then
+    HTMLNAME="maas-documentation-25.html"
+fi
+
+# testcase
+echo "HTMLNAME = $HTMLNAME"
+
+# sed command to allow UI/CLI iso-page switching
+sedcmd="s/zork/$HTMLNAME/g"
+
+# compute name of file pulled from disc
+DISCNAM=$NAME".discmd"
+
+# create workbench dir
+mkdir -p $BENCH
+
+# clear the workbench
+rm -rf $BENCH/*
+
+## future step: lock post from editing
+
+# pull the topic from disc to bench
+dpull -n $TOPIC_NUMBER > $BENCH/$DISCNAM
+
+# pull the master from git to bench
+cp $GIT_MD_ABSPATH $BENCH/
+
+if $rescue_staged ; then
+    cp "$STAGE/markdown/$GIT_MD_BASENAME" $BENCH/
+fi
+
+if $do_edit; then
+    # copy the current discourse version into the git repo
+    cp $BENCH/$DISCNAM $GIT_REPO_ROOT/src/$GIT_MD_BASENAME
+
+    # change to the root of the git repo
+    cd $GIT_REPO_ROOT
+
+    # stage everything (you may not want to do this every time)
+    git add .
+
+    # commit the changes
+    git commit -m "Updated $GIT_MD_BASENAME to current discourse version"
+
+    # push the changes upstream
+    ## this incantation for when there are two active branches (release + master)
+    #git push origin HEAD:master
+    #git push origin HEAD
+    ## this incantation for normal operation mode (just updating master)
+    git push
+
+    # store the diff in a findable file
+    diff $BENCH/$GIT_MD_BASENAME $BENCH/$DISCNAM > $BENCH/md-diff
+
+    # open the text editor of your choice with whatever parameters you prefer
+    ## the point is to temporarily limit focus to the doc being edited atm
+    ## (how you option / configure this is up to you)
+    emacs -q -l /home/stormrider/.emacs2 $BENCH/$DISCNAM $BENCH/$GIT_MD_BASENAME $BENCH/md-diff
+
+    # ask whether to stage the changes (n aborts without changing anything)
+    read -e -p "Stage changes for review? [Y/n] " YN
+
+    # if no, just exit, we're done here for now
+    [[ $YN == "n" || $YN == "N" || $YN == "" ]] && exit
+
+    ## if yes, push changes to staging so they can be checked before final commit
+
+    # provisionally create staging directory in /tmp
+    mkdir -p $STAGE/{log,markdown}
+    mkdir -p $STAGE/production-html-{deb,snap}/{cli,ui}/css
+    cp $GIT_REPO_ROOT/html-support/css/stylesheet.css $STAGE/production-html-deb/cli/css
+    cp $GIT_REPO_ROOT/html-support/css/stylesheet.css $STAGE/production-html-deb/ui/css
+    cp $GIT_REPO_ROOT/html-support/css/stylesheet.css $STAGE/production-html-deb/css
+    mkdir -p $STAGE/production-html-deb/images
+    cp $GIT_REPO_ROOT/html-support/css/stylesheet.css $STAGE/production-html-snap/cli/css
+    cp $GIT_REPO_ROOT/html-support/css/stylesheet.css $STAGE/production-html-snap/ui/css
+    cp $GIT_REPO_ROOT/html-support/css/stylesheet.css $STAGE/production-html-snap/css
+    mkdir -p $STAGE/production-html-snap/images
+
+    # capture the markdown so that we can galley it before final commit
+    cat $BENCH/$GIT_MD_BASENAME | tee $STAGE/markdown/$GIT_MD_BASENAME | dpush -n $GALLEY
+
+    echo "markdown source at file:///$STAGE/markdown/$GIT_MD_BASENAME"
+
+fi
+    
+# get the document's title, for HTML purposes (stored in comment, first line)
+read firstline<$BENCH/$GIT_MD_BASENAME
+TITLE=$(sed -e's/^[^"]*\"\([^"]*\).*$/\1/g' <<< $firstline)
+
+if $do_edit; then
+    # run the snap ui version of the html
+    tab2html "v$VERSION Snap" "UI" "$TITLE" -i $BENCH/$GIT_MD_BASENAME -lllll -L $LOG -o $STAGE/production-html-snap/ui/$HTMLNAME -t $GIT_REPO_ROOT/html-support/templates/$VERSION/snap/ui/template.html
+    echo "pulled template from $GIT_REPO_ROOT/html-support/templates/$VERSION/snap/ui/template.html"
+    sed -i -e"$sedcmd" $STAGE/production-html-snap/ui/$HTMLNAME
+    echo "SNAP UI HTML at file:///$STAGE/production-html-snap/ui/$HTMLNAME"
+
+    # run the deb ui version of the html; don't do images again
+    tab2html "v$VERSION Packages" "UI" "$TITLE" -s -i $BENCH/$GIT_MD_BASENAME -l -L $LOG -o $STAGE/production-html-deb/ui/$HTMLNAME -t $GIT_REPO_ROOT/html-support/templates/$VERSION/deb/ui/template.html
+    sed -i -e"$sedcmd" $STAGE/production-html-deb/ui/$HTMLNAME
+    echo "DEB UI HTML at file:///$STAGE/production-html-deb/ui/$HTMLNAME"
+
+    # run the snap cli version of the html; don't do images again
+    tab2html "v$VERSION Snap" "CLI" "$TITLE" -s -i $BENCH/$GIT_MD_BASENAME -l -L $LOG -o $STAGE/production-html-snap/cli/$HTMLNAME -t $GIT_REPO_ROOT/html-support/templates/$VERSION/snap/cli/template.html
+    sed -i -e"$sedcmd" $STAGE/production-html-snap/cli/$HTMLNAME
+    echo "SNAP CLI HTML at file:///$STAGE/production-html-snap/cli/$HTMLNAME"
+
+    # run the deb cli version of the html; don't do images again
+    tab2html "v$VERSION Packages" "CLI" "$TITLE" -s -i $BENCH/$GIT_MD_BASENAME -l -L $LOG -o $STAGE/production-html-deb/cli/$HTMLNAME -t $GIT_REPO_ROOT/html-support/templates/$VERSION/snap/cli/template.html
+    sed -i -e"$sedcmd" $STAGE/production-html-deb/cli/$HTMLNAME
+    echo "DEB CLI HTML at file:///$STAGE/production-html-deb/cli/$HTMLNAME"
+
+# copy images to the production HTML root dirs
+cp /tmp/images/* $STAGE/production-html-snap/images
+cp /tmp/images/* $STAGE/production-html-deb/images
+
+fi
+
+if $do_edit ; then
+    read -e -p "Upload changes to HTML docs? [Y/n] " YN
+    # if no, just exit, we're done here for now
+    [[ $YN == "n" || $YN == "N" || $YN == "" ]] && exit
+    ## if yes, save changes
+    # copy the (potentially edited) discourse markdown back to the git repo
+    cp $BENCH/$GIT_MD_BASENAME $GIT_MD_ABSPATH
+fi
+
+# ask whether to make these changes permanent
+if $dont_publish ; then
+    echo "NOT publishing these results to discourse"
+else
+    read -e -p "Upload changes to discourse and HTML docs? [Y/n] " YN
+    # if no, just exit, we're done here for now
+    [[ $YN == "n" || $YN == "N" || $YN == "" ]] && exit
+    ## if yes, save changes
+    # copy the (potentially edited) discourse markdown back to the git repo
+    cp $BENCH/$GIT_MD_BASENAME $GIT_MD_ABSPATH
+    # push the discourse markdown up to the docs discourse
+    cat $GIT_MD_ABSPATH | dpush -n $TOPIC_NUMBER
+fi
+
+## IMPORTANT NOTE ##############################################################
+# if you enter the script at this point, you may not have images in the
+# production HTML directories, as these images are only generated during staging
+################################################################################
+
+# run the snap ui version of the html to production
+tab2html "v$VERSION Snap" "UI" "$TITLE" -i $GIT_MD_ABSPATH -l -L $LOG -o $GIT_REPO_ROOT/production-html-snap/ui/$HTMLNAME -t $GIT_REPO_ROOT/html-support/templates/$VERSION/snap/ui/template.html
+sed -i -e"$sedcmd" $GIT_REPO_ROOT/production-html-snap/ui/$HTMLNAME
+
+# run the deb ui version of the html
+tab2html "v$VERSION Packages" "UI" "$TITLE" -i $GIT_MD_ABSPATH -l -L $LOG -o $GIT_REPO_ROOT/production-html-deb/ui/$HTMLNAME -t $GIT_REPO_ROOT/html-support/templates/$VERSION/deb/ui/template.html
+sed -i -e"$sedcmd" $GIT_REPO_ROOT/production-html-deb/ui/$HTMLNAME
+
+# run the snap cli version of the html
+tab2html "v$VERSION Snap" "CLI" "$TITLE" -i $GIT_MD_ABSPATH -l -L $LOG -o $GIT_REPO_ROOT/production-html-snap/cli/$HTMLNAME -t $GIT_REPO_ROOT/html-support/templates/$VERSION/snap/cli/template.html
+sed -i -e"$sedcmd" $GIT_REPO_ROOT/production-html-snap/cli/$HTMLNAME
+
+# run the deb cli version of the html
+tab2html "v$VERSION Packages" "CLI" "$TITLE" -i $GIT_MD_ABSPATH -l -L $LOG -o $GIT_REPO_ROOT/production-html-deb/cli/$HTMLNAME -t $GIT_REPO_ROOT/html-support/templates/$VERSION/snap/cli/template.html
+sed -i -e"$sedcmd" $GIT_REPO_ROOT/production-html-deb/cli/$HTMLNAME
+
+# copy images to production HTML root
+cp /tmp/images/* $GIT_REPO_ROOT/production-html-snap/images
+cp /tmp/images/* $GIT_REPO_ROOT/production-html-deb/images
+
+if $do_edit; then
+    # ask whether to automatically update the git repo
+    read -e -p "Stage all changes and commit/push git repo? [Y/n] " YN
+
+    # if no, just exit, we're done here for now
+    [[ $YN == "n" || $YN == "N" || $YN == "" ]] && exit
+
+    # change to the root of the git repo
+    cd $GIT_REPO_ROOT
+
+    # stage everything (you may not want to do this every time)
+    git add .
+
+    # get a specific commit message for this change
+    read -e -p "Specific commit message (1 line)? " GIT_COMMIT_MESSAGE
+
+    # commit the changes
+    git commit -m "[$HTMLNAME] $GIT_COMMIT_MESSAGE"
+
+    # push the changes upstream
+    ## this incantation for when there are two active branches (release + master)
+    # git push origin HEAD:master
+    # git push origin HEAD
+    ## this incantation for normal operation mode (just updating master)
+    git push
+
+fi
+#!/bin/bash
+# 
+
+usage() {
+    echo "Usage: disced -m <filename> -v <html_version> -b <branch> [options]"
+    echo
+    echo "Options:"
+    echo "  -h                    Show this help message and exit"
+    echo "  -m MARKDOWN_FILENAME  Markdown filename with extension"
+    echo "  -v MAAS_VERSION       MAAS version to publish as HTML, e.g., 3.4"
+    echo "  -b MAAS_BRANCH        Git branch to update"
+    echo "  -s                    Use the last staged version of the document"
+    echo "  -d                    Don't publish the document"
+    echo "  -H                    Just generate HTML, skip all other steps for now"
+    echo "  -R REPO_ROOT          Repo root directory (default ~/src/maas-doc)"
+    echo "  -B BENCH_PATH         Path to temporary workbench (default /tmp/bench)"
+    echo "  -S STAGING_PATH       Path to temporary staging area (default /tmp/staging)"
+    echo "  -G GALLEY_TOPIC       Discourse galley proof topic number (default 4917)"
+    exit 1
+}
+
+maas_version="3.3"
+repo_root="/home/stormrider/src/maas-doc"
+bench_path="/tmp/bench"
+staging_path="/tmp/staging"
+galley_topic="4917"
+rescue_staged=false
+dont_publish=false
+skip_to_html=false
+
+while getopts hm:v:b:sdHR:B:S:G: flag; do
+    case "$flag" in
+	h) usage ;;
+	m) markdown_file=$OPTARG ;;
+	v) maas_version=$OPTARG ;;
+	b) maas_branch=$OPTARG ;;
+        s) rescue_staged=true ;;
+	d) dont_publish=true ;;
+	H) skip_to_html=true ;;
+	R) repo_root=$OPTARG ;;
+	B) bench_path=$OPTARG ;;
+	S) staging_path=$OPTARG ;;
+	G) galley_topic=$OPTARG ;;
+    esac
+done
+
+repo_path="$repo_root/$maas_branch"
+markdown_path="$repo_path/src"
+fq_markdown_path="$markdown_path/$markdown_file"
+
+if $skip_to_html ; then
+    echo "skipping staged files for html fastrack"
+else
+    if $rescue_staged ; then
+	echo "substituting previously staged file for git original"
+	fq_markdown_path="$staging_path/$markdown_file"
+    fi
+fi
+
+html_filename="${markdown_file%-[0-9]*.*}.html"
+discourse_topic_number=$(echo $markdown_file | sed -E 's/.*-([0-9]*).md/\1/')
+
+if [ $html_filename == "maas-documentation.html" ]
+then
+    html_filename="maas-documentation-25.html"
+fi
+sedcmd="s/zork/$html_filename/g"
+discourse_file="${markdown_file%.*}.discmd"
+
+mkdir -p $bench_path
+rm -rf $bench_path/*
+
+dpull -n $discourse_topic_number > $bench_path/$discourse_file
+cp $fq_markdown_path $bench_path/
+
+if $skip_to_html ; then
+    echo "skipping markdown commit for html fastrack"
+else
+    if $rescue_staged ; then
+	cp "$staging_path/markdown/$markdown_file" $bench_path/
+    fi
+
+    echo "$repo_path"
+    cp $bench_path/$discourse_file $repo_path/src/$markdown_file
+    cd $repo_path
+    git add .
+    git commit -m "Updated $markdown_file to current discourse version"
+    git push
+
+    diff $bench_path/$markdown_file $bench_path/$discourse_file > $bench_path/md_diff
+
+    emacs -q -l /home/stormrider/.emacs2 $bench_path/$discourse_file $bench_path/$markdown_file $bench_path/md_diff
+
+    mkdir -p $staging_path/markdown
+    read -e -p "Stage changes for review? [Y/n] " YN
+    [[ $YN == "n" || $YN == "N" || $YN == "" ]] && exit
+    cat $bench_path/$markdown_file \
+	| tee $staging_path/markdown/$markdown_file \
+	| dpush -n $galley_topic
+fi
+
+mkdir -p $staging_path/production-html-{deb,snap}/{cli,ui}/css
+mkdir -p $staging_path/production-html-{deb,snap}/css
+cp $repo_path/html-support/css/stylesheet.css \
+   $staging_path/production-html-deb/cli/css/
+cp $repo_path/html-support/css/stylesheet.css \
+   $staging_path/production-html-deb/ui/css/
+cp $repo_path/html-support/css/stylesheet.css \
+   $staging_path/production-html-deb/css/
+mkdir -p $staging_path/production-html-deb/images
+cp $repo_path/html-support/css/stylesheet.css \
+   $staging_path/production-html-snap/cli/css/
+cp $repo_path/html-support/css/stylesheet.css \
+   $staging_path/production-html-snap/ui/css/
+cp $repo_path/html-support/css/stylesheet.css \
+   $staging_path/production-html-snap/css/
+mkdir -p $staging_path/production-html-snap/images
+
+read firstline<$bench_path/$markdown_file
+html_title=$(sed -e's/^[^"]*\"\([^"]*\).*$/\1/g' <<< $firstline)
+
+# assemble and copy html templates to staging area
+mkdir -p $staging_path/templates
+dest_template=$staging_path/templates
+src_template=$repo_path/html-support/templates/$maas_version
+
+cat "$src_template/header-template.html" \
+    "$src_template/outer-switch-template.html" \
+    "$src_template/outer-body-template.html" \
+    "$src_template/footer-template.html" \
+    > $dest_template/outer-template.html
+
+cat "$src_template/header-template.html" \
+    "$src_template/ui-switch-template.html" \
+    "$src_template/inner-body-template.html" \
+    "$src_template/footer-template.html" \
+    > $dest_template/ui-template.html
+
+cat "$src_template/header-template.html" \
+    "$src_template/cli-switch-template.html" \
+    "$src_template/inner-body-template.html" \
+    "$src_template/footer-template.html" \
+    > $dest_template/cli-template.html
+
+tab2html "v$maas_version Snap" "UI" "$html_title" \
+	 -i $bench_path/$markdown_file \
+	 -lllll \
+	 -L /tmp/tab2html.log \
+	 -o $staging_path/production-html-snap/ui/$html_filename \
+	 -t $dest_template/ui-template.html
+sed -i -e"$sedcmd" $staging_path/production-html-snap/ui/$html_filename
+
+tab2html "v$maas_version Packages" "UI" "$html_title" -s \
+	 -i $bench_path/$markdown_file \
+	 -lllll \
+	 -L /tmp/tab2html.log \
+	 -o $staging_path/production-html-deb/ui/$html_filename \
+	 -t $dest_template/ui-template.html
+sed -i -e"$sedcmd" $staging_path/production-html-deb/ui/$html_filename
+
+tab2html "v$maas_version Snap" "CLI" "$html_title" -s \
+	 -i $bench_path/$markdown_file \
+	 -lllll \
+	 -L /tmp/tab2html.log \
+	 -o $staging_path/production-html-snap/cli/$html_filename \
+	 -t $dest_template/cli-template.html
+sed -i -e"$sedcmd" $staging_path/production-html-snap/cli/$html_filename
+
+tab2html "v$maas_version Packages" "CLI" "$html_title" -s \
+	 -i $bench_path/$markdown_file \
+	 -lllll \
+	 -L /tmp/tab2html.log \
+	 -o $staging_path/production-html-deb/cli/$html_filename \
+	 -t $dest_template/cli-template.html
+sed -i -e"$sedcmd" $staging_path/production-html-deb/cli/$html_filename
+
+cp /tmp/images/* $staging_path/production-html-snap/images
+cp /tmp/images/* $staging_path/production-html-deb/images
+
+if $skip_to_html ; then
+    echo "skip uploading discourse changes for html fastrack"
+else
+    if $dont_publish ; then
+	echo "NOT publishing these results to discourse"
+    else
+	read -e -p "Upload changes to discourse and HTML docs? [Y/n] " YN
+	[[ $YN == "n" || $YN == "N" || $YN == "" ]] && exit
+	cp $bench_path/$markdown_file $fq_markdown_path
+	cat $fq_markdown_path | dpush -n $discourse_topic_number
+    fi
+    echo "$repo_path/production-html-snap"
+fi
+
+cp -R $staging_path/production-html-snap/* $repo_path/production-html-snap
+cp -R $staging_path/production-html-deb/* $repo_path/production-html-deb
+
+if $skip_to_html ; then
+    echo "auto-commit message for html fastrack"
+    commit_message="regenerating HTML version"
+else    
+    read -e -p "Stage all changes and commit/push git repo? [Y/n] " YN
+    [[ $YN == "n" || $YN == "N" || $YN == "" ]] && exit
+    read -e -p "Specific commit message (1 line)? " commit_message
+fi
+
+cd $repo_path
+git add .
+git commit -m "[$markdown_file] $commit_message"
+git push
