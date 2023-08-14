@@ -1,0 +1,30 @@
+# Read tz data file into array 
+readarray -t tz_data < ~/.config/tzdata.txt
+
+# Format strings for each field
+LAB_FMT="%-25s"  
+TIME_FMT="%-17s"
+HANDLE_FMT="%-20s"
+CITY_FMT="%-30s"
+BDAY_FMT="%s"
+
+# Print header
+printf "$LAB_FMT $TIME_FMT $HANDLE_FMT $CITY_FMT $BDAY_FMT\n" \
+       "Name" "Time" "Handle" "City" "Birthday"
+
+# Loop through lines 
+for line in "${tz_data[@]}"; do
+
+  IFS=$'\t' read -ra tz_entry <<< "$line"
+
+  label=${tz_entry[1]}
+  time=$(TZ=${tz_entry[0]} date +'%b %d %H:%M')
+  handle=${tz_entry[2]}
+  city=${tz_entry[3]}
+  bday=${tz_entry[4]}
+
+  # Print formatted rows
+  printf "$LAB_FMT $TIME_FMT $HANDLE_FMT $CITY_FMT $BDAY_FMT\n" \
+         "$label" "$time" "$handle" "$city" "$bday"
+
+done

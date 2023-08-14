@@ -1,0 +1,37 @@
+#!/bin/bash
+set -e
+
+SRC=$(readlink -f "${1:-$PWD}")
+
+if [ ! -d "$SRC" ]; then {
+    echo "Expected '$1' to be a directory" >&2
+    exit 1
+}
+fi
+
+PROJECT_NAME=$(basename "$SRC")
+CONTAINER_NAME=${CONTAINER:-$PROJECT_NAME}
+SSH_ME=${SSH_ME:-$(bzr lp-login)}
+
+SERIES=${SERIES:-focal}
+# TODO: Conditionalise launching and setup based on existing or not
+# lxc list --fast --format=json "$PROJECT_NAME" | grep -q "$PROJECT_NAME" 
+lxc launch --verbose --debug ubuntu:$SERIES "$CONTAINER_NAME" -c raw.idmap="both $UID 1000" -c user.user-data="\
+#cloud-config
+{'ssh_import_id': '$SSH_ME', 'apt_pipelining': 'os', 'package_update': true,
+ 'packages': ['language-pack-en'], 'write-files': {'content': 'export DEBEMAIL=\"Adam Collard <adam.collard@canonical.com>\"', 'path': '/home/ubuntu/.bashrc', 'append': 'true'}
+}
+"
+
+lxc exec "$CONTAINER_NAME" -- cloud-init status --wait || echo 'Old cloud-init, snoozing instead'; sleep 5
+[ -f ~/.gitconfig ] && lxc file push ~/.gitconfig "$CONTAINER_NAME"/home/ubuntu/.gitconfig
+if host "$CONTAINER_NAME".lxd >/dev/null; then
+    DST="$CONTAINER_NAME".lxd
+else
+    DST=$(lxc list "$CONTAINER_NAME" -c4 --format=csv | cut -d' ' -f1)
+fi
+ssh-keyscan -H $DST >> ~/.ssh/known_hosts 2>/dev/null
+lxc config device add "$CONTAINER_NAME" "${PROJECT_NAME}-src" disk source="$SRC" path=/home/ubuntu/"$PROJECT_NAME"
+echo "$CONTAINER_NAME ready to hack on; try 
+ssh ubuntu@$DST"
+

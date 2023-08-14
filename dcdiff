@@ -1,0 +1,47 @@
+#!/bin/bash
+#
+# ddd = "do discourse diff"
+#       cmp a dir of markdown files with their counterpart in discourse,
+#       and print the following for each file:
+# filename = same || different
+#
+# using "cmp file1 file1 && echo same || echo different" as the core algorithm
+
+# change this variable to the directory you want to scan
+DIR="/home/stormrider/usr/src/maas-offline-docs/src"
+
+mkdir -p /tmp/ddd
+
+# loop through all the markdown files in the above directory
+for FILE in $DIR/*.md
+do
+    # copy the file to /tmp/ddd
+    cp $FILE /tmp/ddd
+
+    # get base filename
+    BASENAME="$(basename "${FILE}")"
+
+    # peel topic number out of basename
+    NAME=$(echo "$BASENAME" | cut -f 1 -d '.')
+    TOPIC_NUMBER=$(echo "$NAME" | rev | cut -f 1 -d'-' | rev)
+
+    # pull the discourse version to /tmp/ddd/$FILE.disc
+    dpull -n $TOPIC_NUMBER > /tmp/ddd/$BASENAME.disc
+    DTITLE=$(dpull -n $TOPIC_NUMBER -t)
+
+    # compare the files & issue the results
+    diff -Z /tmp/ddd/$BASENAME /tmp/ddd/$BASENAME.disc &> /dev/null
+    if [ $? -ne 0 ]
+    then
+	echo "$BASENAME: different"
+    fi
+
+    # print the embedded HTML title versus the filename to detect differences
+    HTITLE=$(head -1 /tmp/ddd/$BASENAME)
+    echo "File title:" $BASENAME | sed -e's/.md//g' | sed -e's/[0-9]*//g' | sed -e's/-/ /g' | sed 's/./\U&/' | sed -e's/ $//g'
+    echo "HTML title:" $HTITLE | sed -e's/\"//g' | sed -e's/<!-- //g' | sed -e's/ -->//g'
+    echo "Disc title:" $DTITLE
+    echo "------"
+
+done
+

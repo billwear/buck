@@ -1,0 +1,3 @@
+#!/bin/bash
+
+curl -s wttr.in/Necaise?format="%l+%T+%c+%t+%h+%P+R:%S+S:%s+%m\n"

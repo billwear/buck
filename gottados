@@ -1,0 +1,4 @@
+#!/bin/bash
+
+calendar -A 0 | grep "@gotta"
+
