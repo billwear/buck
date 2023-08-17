@@ -1,0 +1,32 @@
+#!/bin/bash
+
+if [ "$#" -ne 3 ]; then
+    echo "Usage: $0 <topic_number> <repo_name> <branch>"
+    exit 1
+fi
+
+topic_number="$1"
+repo_name="$2"
+branch="$3"
+
+# Stage the files
+dcstage_command="python3 dcstage -r \"$repo_name\" -b \"$branch\" -t \"$topic_number\""
+
+echo "Running DCStage for topic $topic_number from repo $repo_name on branch $branch..."
+echo "Executing: $dcstage_command"
+
+eval "$dcstage_command"
+
+# Open Emacs with relevant files
+staging_files=$(find ~/.staging -name "*$topic_number*" -type f -perm /u=r)
+
+emacs_command="emacs -q"
+for file in $staging_files; do
+    emacs_command="$emacs_command \"$file\""
+done
+
+echo "Opening Emacs with the following files:"
+echo "$staging_files"
+echo "Executing: $emacs_command"
+
+eval "$emacs_command"
