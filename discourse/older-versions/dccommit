@@ -1,0 +1,17 @@
+# /bin/bash
+#
+# dccommit: pull the contents of a Discourse topic and commit it to a specified repository
+#
+# $1 = fully qualified path to markdown file
+# $2 = commit message (use "")
+
+filepath="$1"
+filename="${filepath##*/}"
+git_repo="${filepath%/*}"
+topic=${filename##*-}
+topic=${topic%.*}
+cd $git_repo
+dpull -n $topic > $filepath
+git add .
+git commit -m "$2"
+git push

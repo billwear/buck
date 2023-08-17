@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+import os
+import argparse
+import subprocess
+import requests
+import base64
+import difflib
+
+
+def find_github_filename(repo_name, topic_number):
+    files = os.listdir(repo_name)
+    target_file = None
+
+    for file in files:
+        if f"-{topic_number}.md" in file:
+            target_file = file
+            break
+
+    return target_file
+
+
+def retrieve_github_file(repo_name, branch, topic_number):
+    url = f"https://api.github.com/repos/{repo_name}/contents/{find_github_filename(repo_name, topic_number)}?ref={branch}"
+    response = requests.get(url)
+
+    if response.status_code == 200:
+        file_content = response.json()["content"]
+        markdown_content = base64.b64decode(file_content).decode("utf-8")
+        return markdown_content
+    else:
+        print("GitHub API pull failed. Attempting to retrieve from local directory...")
+        local_filename = find_github_filename(repo_name, topic_number)
+        if local_filename:
+            local_path = os.path.join(repo_name, local_filename)
+            try:
+                with open(local_path, "r") as local_file:
+                    return local_file.read()
+            except FileNotFoundError:
+                print(
+                    "Local file retrieval failed as well. Could not retrieve the content."
+                )
+                return None
+        else:
+            print(
+                f"Local file '{topic_number}' not found. Could not retrieve the content."
+            )
+            return None
+
+
+def create_staging_directory():
+    home_dir = os.path.expanduser("~")
+    staging_dir = os.path.join(home_dir, ".staging")
+
+    if not os.path.exists(staging_dir):
+        os.makedirs(staging_dir)
+        print("Created ~/.staging directory.")
+
+
+def retrieve_discourse_markdown(topic_number):
+    process = subprocess.Popen(
+        ["dcpull", "-n", str(topic_number)], stdout=subprocess.PIPE, text=True
+    )
+    stdout, _ = process.communicate()
+    return stdout
+
+
+def save_diff_to_file(topic_number, github_content, discourse_content):
+    diff_lines = difflib.unified_diff(
+        github_content.splitlines(), discourse_content.splitlines()
+    )
+    diff_text = "\n".join(diff_lines)
+
+    diff_filename = f"diff-{topic_number}.txt"
+    diff_file_path = os.path.join(os.path.expanduser("~"), ".staging", diff_filename)
+
+    with open(diff_file_path, "w") as diff_file:
+        diff_file.write(diff_text)
+
+    print(f"Diff between GitHub and Discourse versions saved as '{diff_filename}'.")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Create a staging directory and retrieve Discourse markdown."
+    )
+    parser.add_argument(
+        "-r", "--repo-name", required=True, help="GitHub repository name"
+    )
+    parser.add_argument("-b", "--branch", required=True, help="GitHub branch name")
+    parser.add_argument(
+        "-t", "--topic-number", required=True, help="Discourse topic number"
+    )
+
+    args = parser.parse_args()
+
+    create_staging_directory()
+
+    try:
+        topic_number = int(args.topic_number)
+    except ValueError:
+        print("Error: The topic number must be a valid integer.")
+        return
+
+    markdown_content_discourse = retrieve_discourse_markdown(topic_number)
+    markdown_content_github = retrieve_github_file(
+        args.repo_name, args.branch, args.topic_number
+    )
+
+    markdown_file_discourse = os.path.join(
+        os.path.expanduser("~"), ".staging", f"discourse-{topic_number}.md"
+    )
+    with open(markdown_file_discourse, "w") as file:
+        file.write(markdown_content_discourse)
+
+    print(
+        f"Staged topic {topic_number} as 'discourse_{topic_number}.md' from Discourse."
+    )
+
+    github_filename = find_github_filename(args.repo_name, args.topic_number)
+    if github_filename and markdown_content_github:
+        github_markdown_file = os.path.join(
+            os.path.expanduser("~"), ".staging", github_filename
+        )
+        with open(github_markdown_file, "w") as file:
+            file.write(markdown_content_github)
+        print(f"Staged topic {args.topic_number} as '{github_filename}' from GitHub.")
+
+        save_diff_to_file(
+            topic_number, markdown_content_github, markdown_content_discourse
+        )
+    else:
+        print(f"GitHub markdown file for topic {args.topic_number} not found.")
+
+
+if __name__ == "__main__":
+    main()

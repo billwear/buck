@@ -14,15 +14,8 @@ if [ ! -f "$JOURNAL" ]; then
 	ddate >> "$JOURNAL"
 	fortune -s fortunes >> "$JOURNAL"
 	echo " " >> "$JOURNAL"
-	echo "*** appointments" >> "$JOURNAL"
-	calendar -A0 | grep "@appt" >> "$JOURNAL"
-	echo " " >> "$JOURNAL"
-	echo "*** things to do" >> "$JOURNAL"
-	calendar -A 0 >> $JOURNAL
-	echo " " >> "$JOURNAL"
 	echo "*** daily journal" >> "$JOURNAL"
-	sed -i -e's/^[A-Za-z]* [0-9]*[*]*\t//g' "$JOURNAL"
-	sed -i -e's/@[a-z]*//g' "$JOURNAL"
+
 fi
 
 # Open journal file in vim
