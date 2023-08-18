@@ -13,6 +13,8 @@ An eclectic collection of command line tools for various and nefarious purposes.
 
 ## Discourse tools (/discourse)
 
+Currently in flux...
+
 * dcdiff: DisCourse DIFF - diff two discourse directories
 * dclock: DisCourse LOCK - lock a discourse topic.
 * dcpull: DisCourse PULL - pull a discourse topic.

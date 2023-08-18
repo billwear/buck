@@ -1,0 +1,70 @@
+#!/usr/bin/python3
+
+import re
+import sys
+
+
+def replace_date_expression(date):
+    return date.replace("<.+?>", "DAILY")
+
+
+def extract_todo_items(org_content):
+    todo_items = []
+    lines = org_content.split("\n")
+    current_schedule = None
+
+    for i, line in enumerate(lines):
+        line = line.strip()
+
+        # Match lines with indentation, numbers, and TODO or MEETING
+        match = re.match(
+            r"^(\*+)\s*(\d+(\.\d+)*)?\s*(TODO|MEETING)\s+(.*)", line, re.IGNORECASE
+        )
+        if match:
+            indentation, _, _, _, todo_item = match.groups()
+
+            todo_item = re.sub(r"\s+:.*:", "", todo_item)  # Remove tags
+            todo_item = re.sub(r"\s*\[#\w\]", "", todo_item)  # Remove priorities
+            todo_item = todo_item.lstrip()
+
+            if current_schedule:
+                current_schedule = replace_date_expression(current_schedule)
+                todo_items.append(f"{current_schedule} {todo_item}")
+                current_schedule = None
+            else:
+                todo_items.append(todo_item)
+
+            # Check if the next line starts with SCHEDULED
+            if i + 1 < len(lines) and lines[i + 1].startswith("SCHEDULED:"):
+                current_schedule = re.sub(r"SCHEDULED:\s*", "", lines[i + 1])
+
+    return todo_items
+
+
+def main():
+    org_content = ""
+
+    if len(sys.argv) > 1:
+        org_file_path = sys.argv[1]
+        with open(org_file_path, "r") as org_file:
+            org_content = org_file.read()
+    else:
+        try:
+            while True:
+                line = input()
+                org_content += line + "\n"
+        except EOFError:
+            pass
+
+    todo_items = extract_todo_items(org_content)
+
+    if todo_items:
+        print("TODO items:")
+        for item in todo_items:
+            print(item)
+    else:
+        print("No TODO items found.")
+
+
+if __name__ == "__main__":
+    main()

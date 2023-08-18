@@ -1,0 +1,45 @@
+import re
+import sys
+
+
+def extract_todo_items(org_content):
+    todo_items = []
+
+    # Search for TODO items using regular expression
+    todo_matches = re.findall(r"\*\s+TODO\s+([^*]+)", org_content, re.IGNORECASE)
+
+    for match in todo_matches:
+        todo_items.append(match.strip())
+
+    return todo_items
+
+
+def main():
+    org_content = ""
+
+    print("hello, world")
+    sys.exit(0)
+    if len(sys.argv) > 1:
+        org_file_path = sys.argv[1]
+        with open(org_file_path, "r") as org_file:
+            org_content = org_file.read()
+    else:
+        try:
+            while True:
+                line = input()
+                org_content += line + "\n"
+        except EOFError:
+            pass
+
+    todo_items = extract_todo_items(org_content)
+
+    if todo_items:
+        print("TODO items:")
+        for item in todo_items:
+            print(item)
+    else:
+        print("No TODO items found.")
+
+
+if __name__ == "__main__":
+    main()
